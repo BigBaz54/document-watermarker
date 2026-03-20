@@ -15,7 +15,7 @@ log = logging.getLogger("uvicorn.error")
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-WATERMARK_TEXT = os.getenv("WATERMARK_TEXT", "CONFIDENTIEL")
+WATERMARK_TEXT = os.getenv("WATERMARK_TEXT", "Copie destinée à : — Usage : — Date : {date} — Toute autre utilisation est interdite")
 RASTERIZE_DPI = int(os.getenv("RASTERIZE_DPI", "300"))
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 WATERMARK_FONT_SIZE = int(os.getenv("WATERMARK_FONT_SIZE", "48"))
@@ -188,6 +188,12 @@ async def watermark(
     watermark_text: str = Form(default=""),
 ):
     text = watermark_text.strip() or WATERMARK_TEXT
+    # Flatten multiline input to single line
+    text = " — ".join(line.strip() for line in text.splitlines() if line.strip())
+    # Replace {date} placeholder with today's date
+    if "{date}" in text:
+        from datetime import date
+        text = text.replace("{date}", date.today().strftime("%d/%m/%Y"))
 
     # Validate extension
     filename = file.filename or "file"
