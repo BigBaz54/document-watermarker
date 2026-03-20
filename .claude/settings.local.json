@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls /mnt/c/Users/LV/OneDrive/Bureau/document-watermarker/venv/lib/python*/site-packages/)"
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      - WATERMARK_TEXT=CONFIDENTIEL
+      - RASTERIZE_DPI=300
+      - MAX_FILE_SIZE_MB=50
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      start_period: 10s
+
+networks:
+  internal:
+    external: true
