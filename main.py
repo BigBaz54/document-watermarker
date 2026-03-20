@@ -119,11 +119,16 @@ def process_pdf(data: bytes, text: str) -> io.BytesIO:
     """Rasterise every PDF page, apply watermark, rebuild as image-only PDF."""
     doc = fitz.open(stream=data, filetype="pdf")
     watermarked_pages: list[Image.Image] = []
+    overlay_cache: dict[tuple[int, int], Image.Image] = {}
 
     for page in doc:
         pix = page.get_pixmap(dpi=RASTERIZE_DPI)
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        img = apply_watermark_to_image(img, text)
+        img = img.convert("RGBA")
+        key = (img.width, img.height)
+        if key not in overlay_cache:
+            overlay_cache[key] = create_watermark_overlay(img.width, img.height, text)
+        img = Image.alpha_composite(img, overlay_cache[key])
         img = img.convert("RGB")
         watermarked_pages.append(img)
 
