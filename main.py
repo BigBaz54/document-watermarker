@@ -97,23 +97,40 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
         stamps.append(stamp.rotate(30, resample=Image.BICUBIC, expand=False))
 
     step_x = int(text_w * 1.1)
-    # Each row offset = 1/num_rows of image width
-    row_shift = width // num_rows
-    wave_amplitude = step_y // 6
+    wave_amplitude = step_y // 8
 
-    margin = stamp_size
-    for row in range(num_rows + 4):
-        y = -margin + row * step_y
+    # Each row gets a horizontal offset that progresses across the image width
+    # spread evenly so every part of the text is visible somewhere
+    row_shift = step_x // num_rows
+
+    # Total rows needed to cover image height (ref may be taller than image)
+    total_rows = height // step_y + 2
+    margin_x = stamp_size
+
+    for row in range(total_rows):
+        band_top = row * step_y
+        band_bottom = band_top + step_y
+        # Create a band overlay so stamps don't bleed into adjacent bands
+        band = Image.new("RGBA", (width, step_y), (0, 0, 0, 0))
         s = stamps[row % len(stamps)]
         wavy = row % 3 == 1
-        x_start = -margin + (row % num_rows) * row_shift
-        x = x_start - step_x
+        # Offset progresses by row_shift each row
+        x_offset = (row % num_rows) * row_shift
+        x = -margin_x + x_offset
         col = 0
-        while x < width + margin:
+        cy = (step_y - stamp_size) // 2  # center stamp vertically in band
+        while x < width + margin_x:
             dy = int(math.sin(col * 2 * math.pi / 6) * wave_amplitude) if wavy else 0
-            overlay.paste(s, (x, y + dy), s)
+            band.paste(s, (x, cy + dy), s)
             x += step_x
             col += 1
+        # Paste band into overlay, clipped to image bounds
+        paste_y = max(0, band_top)
+        crop_top = paste_y - band_top
+        crop_bottom = min(step_y, height - band_top)
+        if crop_bottom > crop_top:
+            cropped = band.crop((0, crop_top, width, crop_bottom))
+            overlay.paste(cropped, (0, paste_y), cropped)
 
     return overlay
 
