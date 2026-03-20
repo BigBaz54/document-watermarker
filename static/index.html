@@ -262,7 +262,7 @@ function setResultDone(li, name, blobUrl) {
   const a = document.createElement('a');
   a.href = blobUrl;
   a.target = '_blank';
-  a.download = `watermarked_${name}`;
+  a.rel = 'noopener';
   a.textContent = 'Open';
   action.replaceWith(a);
 }
