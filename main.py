@@ -15,7 +15,7 @@ log = logging.getLogger("uvicorn.error")
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-WATERMARK_TEXT = os.getenv("WATERMARK_TEXT", "Copie destinée à : — Usage : — Date : {date} — Toute autre utilisation est interdite")
+WATERMARK_TEXT = os.getenv("WATERMARK_TEXT", "Copie destinée à : — Usage : — Date : {date}")
 RASTERIZE_DPI = int(os.getenv("RASTERIZE_DPI", "300"))
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 WATERMARK_FONT_SIZE = int(os.getenv("WATERMARK_FONT_SIZE", "48"))
@@ -52,30 +52,25 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     return ImageFont.load_default(size)
 
 
-def create_watermark_overlay(
-    width: int, height: int, text: str, dpi: int = 96
-) -> Image.Image:
+def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
     """Create a transparent overlay with diagonal tiled watermark text."""
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    # Scale font: target ~2.5% of the smaller dimension at 96 DPI.
-    # At higher DPI (PDF rasterization), there are more pixels per inch
-    # so we scale down proportionally to keep the same physical size.
-    font_size = max(16, int(min(width, height) / 40 * 96 / dpi))
+    font_size = max(16, min(width, height) // 25)
     font = _load_font(font_size)
 
-    # Measure text size
+    # Measure text
     tmp = Image.new("RGBA", (1, 1))
     draw = ImageDraw.Draw(tmp)
     bbox = draw.textbbox((0, 0), text, font=font)
     text_w = bbox[2] - bbox[0]
     text_h = bbox[3] - bbox[1]
 
-    # Rotating colors: blue, red, black, grey (like .gouv style)
+    # Colors: blue, red, black, grey
     colors = [
-        (0, 0, 180, WATERMARK_OPACITY),      # blue
-        (180, 0, 0, WATERMARK_OPACITY),       # red
-        (0, 0, 0, WATERMARK_OPACITY),         # black
-        (128, 128, 128, WATERMARK_OPACITY),   # grey
+        (0, 0, 180, WATERMARK_OPACITY),
+        (180, 0, 0, WATERMARK_OPACITY),
+        (0, 0, 0, WATERMARK_OPACITY),
+        (128, 128, 128, WATERMARK_OPACITY),
     ]
 
     # Create one rotated stamp per color
@@ -89,14 +84,13 @@ def create_watermark_overlay(
         ImageDraw.Draw(stamp).text((tx, ty), text, font=font, fill=color)
         stamps.append(stamp.rotate(45, resample=Image.BICUBIC, expand=False))
 
-    # Tile with varied X offset per row so text never aligns in columns
-    # and every part of the phrase is visible somewhere on the image
     step_x = int(text_w * 1.8)
     step_y = int(text_h * 4.0)
     wave_amplitude = text_h * 1.5
 
-    # Use golden ratio to spread row offsets evenly across step_x
-    golden = (math.sqrt(5) - 1) / 2
+    # Shift each row by 1/4 of step_x so text starts at different positions
+    # and every part of the phrase is readable somewhere
+    shift = step_x // 4
 
     margin = stamp_size
     row = 0
@@ -104,9 +98,7 @@ def create_watermark_overlay(
     while y < height + margin:
         s = stamps[row % len(stamps)]
         wavy = row % 3 == 1
-        # Each row starts at a different X offset (golden ratio distribution)
-        row_offset = int((row * golden % 1) * step_x)
-        x = -margin - step_x + row_offset
+        x = -margin - step_x + (row % 4) * shift
         col = 0
         while x < width + margin:
             dy = int(math.sin(col * 2 * math.pi / 6) * wave_amplitude) if wavy else 0
@@ -119,14 +111,12 @@ def create_watermark_overlay(
     return overlay
 
 
-def apply_watermark_to_image(
-    image: Image.Image, text: str, dpi: int = 96
-) -> Image.Image:
+def apply_watermark_to_image(image: Image.Image, text: str) -> Image.Image:
     """Apply watermark overlay to a PIL Image."""
-    log.info("Watermarking image: mode=%s size=%sx%s dpi=%d", image.mode, image.width, image.height, dpi)
+    log.info("Watermarking image: mode=%s size=%sx%s", image.mode, image.width, image.height)
     image.load()
     image = image.convert("RGB").convert("RGBA")
-    overlay = create_watermark_overlay(image.width, image.height, text, dpi=dpi)
+    overlay = create_watermark_overlay(image.width, image.height, text)
     return Image.alpha_composite(image, overlay)
 
 
@@ -159,7 +149,7 @@ def process_pdf(data: bytes, text: str) -> io.BytesIO:
         img = img.convert("RGBA")
         key = (img.width, img.height)
         if key not in overlay_cache:
-            overlay_cache[key] = create_watermark_overlay(img.width, img.height, text, dpi=RASTERIZE_DPI)
+            overlay_cache[key] = create_watermark_overlay(img.width, img.height, text)
         img = Image.alpha_composite(img, overlay_cache[key])
         img = img.convert("RGB")
         watermarked_pages.append(img)
