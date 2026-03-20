@@ -51,7 +51,7 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     return ImageFont.load_default(size)
 
 
-WATERMARK_ROWS = int(os.getenv("WATERMARK_ROWS", "6"))
+WATERMARK_ROWS = int(os.getenv("WATERMARK_ROWS", "8"))
 
 
 def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
@@ -67,7 +67,7 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
         ref = height
     num_rows = WATERMARK_ROWS
     step_y = ref // num_rows
-    font_size = max(12, step_y // 4)
+    font_size = max(12, step_y // 6)
     font = _load_font(font_size)
 
     # Measure text
@@ -94,7 +94,7 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
     for color in colors:
         stamp = Image.new("RGBA", (stamp_size, stamp_size), (0, 0, 0, 0))
         ImageDraw.Draw(stamp).text((tx, ty), text, font=font, fill=color)
-        stamps.append(stamp.rotate(45, resample=Image.BICUBIC, expand=False))
+        stamps.append(stamp.rotate(30, resample=Image.BICUBIC, expand=False))
 
     step_x = int(text_w * 1.1)
     # Each row offset = 1/num_rows of image width
