@@ -8,7 +8,11 @@ Web app that applies diagonal tiled watermarks to PDFs and images. PDFs are full
 docker compose up -d
 ```
 
-> The `internal` Docker network must already exist (created by the Caddy compose).
+If the `internal` network doesn't exist yet:
+
+```bash
+docker network create internal
+```
 
 ## Configuration
 
