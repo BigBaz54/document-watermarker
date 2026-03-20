@@ -19,7 +19,7 @@ WATERMARK_TEXT = os.getenv("WATERMARK_TEXT", "CONFIDENTIEL")
 RASTERIZE_DPI = int(os.getenv("RASTERIZE_DPI", "300"))
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 WATERMARK_FONT_SIZE = int(os.getenv("WATERMARK_FONT_SIZE", "48"))
-WATERMARK_OPACITY = int(os.getenv("WATERMARK_OPACITY", "64"))
+WATERMARK_OPACITY = int(os.getenv("WATERMARK_OPACITY", "90"))
 
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
@@ -66,31 +66,47 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
     text_w = bbox[2] - bbox[0]
     text_h = bbox[3] - bbox[1]
 
-    # Create a single rotated text stamp
+    # Rotating colors: blue, red, black, grey (like .gouv style)
+    colors = [
+        (0, 0, 180, WATERMARK_OPACITY),      # blue
+        (180, 0, 0, WATERMARK_OPACITY),       # red
+        (0, 0, 0, WATERMARK_OPACITY),         # black
+        (128, 128, 128, WATERMARK_OPACITY),   # grey
+    ]
+
+    # Create one rotated stamp per color
     padding = 20
     stamp_size = int(math.sqrt((text_w + padding) ** 2 + (text_h + padding) ** 2)) + 4
-    stamp = Image.new("RGBA", (stamp_size, stamp_size), (0, 0, 0, 0))
-    stamp_draw = ImageDraw.Draw(stamp)
     tx = (stamp_size - text_w) // 2
     ty = (stamp_size - text_h) // 2
-    stamp_draw.text(
-        (tx, ty), text, font=font, fill=(128, 128, 128, WATERMARK_OPACITY)
-    )
-    stamp = stamp.rotate(45, resample=Image.BICUBIC, expand=False)
+    stamps = []
+    for color in colors:
+        stamp = Image.new("RGBA", (stamp_size, stamp_size), (0, 0, 0, 0))
+        ImageDraw.Draw(stamp).text((tx, ty), text, font=font, fill=color)
+        stamps.append(stamp.rotate(45, resample=Image.BICUBIC, expand=False))
 
-    # Tile across the image
+    # Tile with brick pattern, alternating colors, some rows wavy
     step_x = int(text_w * 1.8)
     step_y = int(text_h * 4.0)
+    offset_x = step_x // 2
+    wave_amplitude = text_h * 1.5
+    wave_period = text_w * 3
 
-    # Extend beyond bounds to cover corners after rotation
     margin = stamp_size
+    row = 0
     y = -margin
     while y < height + margin:
-        x = -margin
+        s = stamps[row % len(stamps)]
+        wavy = row % 3 == 1  # every 3rd row is wavy
+        x = -margin + (offset_x if row % 2 else 0)
+        col = 0
         while x < width + margin:
-            overlay.paste(stamp, (x, y), stamp)
+            dy = int(math.sin(col * 2 * math.pi / 6) * wave_amplitude) if wavy else 0
+            overlay.paste(s, (x, y + dy), s)
             x += step_x
+            col += 1
         y += step_y
+        row += 1
 
     return overlay
 
