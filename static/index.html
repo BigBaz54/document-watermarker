@@ -256,6 +256,7 @@ submitBtn.addEventListener('click', async () => {
         continue;
       }
       success++;
+      loadHistory();
     } catch (e) {
       showToast(`${f.name}: Network error`, 'error');
     }
