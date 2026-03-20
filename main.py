@@ -2,12 +2,15 @@ import io
 import logging
 import math
 import os
+import threading
+import time
+import uuid
 from datetime import date
 from pathlib import Path
 
 import fitz
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageDraw, ImageFont
 
@@ -21,6 +24,7 @@ RASTERIZE_DPI = int(os.getenv("RASTERIZE_DPI", "300"))
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 WATERMARK_OPACITY = int(os.getenv("WATERMARK_OPACITY", "100"))
 WATERMARK_ROWS = int(os.getenv("WATERMARK_ROWS", "6"))
+FILE_TTL = int(os.getenv("FILE_TTL", "3600"))  # seconds
 
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".webp"}
@@ -42,9 +46,50 @@ WATERMARK_COLORS = [
 ]
 
 # ---------------------------------------------------------------------------
+# In-memory file store (TTL = 1h)
+# ---------------------------------------------------------------------------
+file_store: dict[str, dict] = {}
+store_lock = threading.Lock()
+
+
+def store_file(filename: str, data: bytes, media_type: str) -> str:
+    file_id = uuid.uuid4().hex[:12]
+    with store_lock:
+        file_store[file_id] = {
+            "filename": filename,
+            "data": data,
+            "media_type": media_type,
+            "created": time.time(),
+        }
+    return file_id
+
+
+def cleanup_expired():
+    now = time.time()
+    with store_lock:
+        expired = [k for k, v in file_store.items() if now - v["created"] > FILE_TTL]
+        for k in expired:
+            del file_store[k]
+
+
+def start_cleanup_thread():
+    def loop():
+        while True:
+            time.sleep(60)
+            cleanup_expired()
+    t = threading.Thread(target=loop, daemon=True)
+    t.start()
+
+
+# ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 app = FastAPI(title="Document Watermarker")
+
+
+@app.on_event("startup")
+def on_startup():
+    start_cleanup_thread()
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -55,7 +100,6 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
     """Create a transparent overlay with diagonal tiled watermark text."""
-    # Normalize: if landscape, compute as if placed in a portrait A4 page
     ref = int(width * A4_RATIO) if width > height else height
 
     num_rows = WATERMARK_ROWS
@@ -63,7 +107,6 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
     font_size = max(12, step_y // 10)
     font = _load_font(font_size)
 
-    # Build one long repeated line: "text     text     text     text"
     sep = "     "
     line = (text + sep) * 4
 
@@ -84,7 +127,6 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
 
 
 def apply_watermark(image: Image.Image, text: str) -> Image.Image:
-    """Apply watermark overlay to a PIL Image."""
     image.load()
     image = image.convert("RGB").convert("RGBA")
     overlay = create_watermark_overlay(image.width, image.height, text)
@@ -92,7 +134,6 @@ def apply_watermark(image: Image.Image, text: str) -> Image.Image:
 
 
 def process_image(data: bytes, ext: str, text: str) -> io.BytesIO:
-    """Watermark a single image, return bytes in the same format."""
     watermarked = apply_watermark(Image.open(io.BytesIO(data)), text)
     output = io.BytesIO()
     if ext in (".jpg", ".jpeg"):
@@ -106,7 +147,6 @@ def process_image(data: bytes, ext: str, text: str) -> io.BytesIO:
 
 
 def process_pdf(data: bytes, text: str) -> io.BytesIO:
-    """Rasterise every PDF page, apply watermark, rebuild as image-only PDF."""
     doc = fitz.open(stream=data, filetype="pdf")
     pages: list[Image.Image] = []
     overlay_cache: dict[tuple[int, int], Image.Image] = {}
@@ -142,12 +182,8 @@ async def health():
 async def watermark(
     file: UploadFile = File(...),
     watermark_text: str = Form(default=""),
+    apply: str = Form(default="true"),
 ):
-    text = watermark_text.strip() or WATERMARK_TEXT
-    text = " — ".join(line.strip() for line in text.splitlines() if line.strip())
-    if "{date}" in text:
-        text = text.replace("{date}", date.today().strftime("%d/%m/%Y"))
-
     filename = file.filename or "file"
     ext = Path(filename).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -157,12 +193,51 @@ async def watermark(
     if len(data) > MAX_FILE_SIZE_BYTES:
         raise HTTPException(413, f"File exceeds {MAX_FILE_SIZE_MB} MB limit.")
 
-    result = process_image(data, ext, text) if ext in IMAGE_EXTENSIONS else process_pdf(data, text)
+    if apply == "true":
+        text = watermark_text.strip() or WATERMARK_TEXT
+        text = " — ".join(line.strip() for line in text.splitlines() if line.strip())
+        if "{date}" in text:
+            text = text.replace("{date}", date.today().strftime("%d/%m/%Y"))
+        result = process_image(data, ext, text) if ext in IMAGE_EXTENSIONS else process_pdf(data, text)
+        out_name = f"{Path(filename).stem}_watermarked{ext}"
+        file_data = result.read()
+    else:
+        out_name = filename
+        file_data = data
 
-    return StreamingResponse(
-        result,
-        media_type=MEDIA_TYPES.get(ext, "application/octet-stream"),
-        headers={"Content-Disposition": f'attachment; filename="{Path(filename).stem}_watermarked{ext}"'},
+    media_type = MEDIA_TYPES.get(ext, "application/octet-stream")
+    file_id = store_file(out_name, file_data, media_type)
+
+    return JSONResponse({"id": file_id, "filename": out_name})
+
+
+@app.get("/files")
+async def list_files():
+    cleanup_expired()
+    now = time.time()
+    with store_lock:
+        items = [
+            {
+                "id": k,
+                "filename": v["filename"],
+                "expires_in": int(FILE_TTL - (now - v["created"])),
+            }
+            for k, v in file_store.items()
+        ]
+    items.sort(key=lambda x: x["expires_in"])
+    return JSONResponse(items)
+
+
+@app.get("/files/{file_id}")
+async def download_file(file_id: str):
+    with store_lock:
+        entry = file_store.get(file_id)
+    if not entry or time.time() - entry["created"] > FILE_TTL:
+        raise HTTPException(404, "File expired or not found")
+    return Response(
+        content=entry["data"],
+        media_type=entry["media_type"],
+        headers={"Content-Disposition": f'attachment; filename="{entry["filename"]}"'},
     )
 
 

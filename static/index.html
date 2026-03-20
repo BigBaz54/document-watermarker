@@ -13,9 +13,9 @@ body{
 }
 .container{width:100%;max-width:680px}
 h1{text-align:center;margin-bottom:1.5rem;font-size:1.6rem;color:#7c6ff7}
+h2{font-size:1rem;color:#aaa;margin-bottom:.6rem}
 label{display:block;margin-bottom:.4rem;font-size:.85rem;color:#aaa}
 
-/* Watermark input */
 .input-group{margin-bottom:1.2rem}
 .input-group textarea{
   width:100%;padding:.6rem .8rem;border:1px solid #333;border-radius:8px;
@@ -24,7 +24,6 @@ label{display:block;margin-bottom:.4rem;font-size:.85rem;color:#aaa}
 }
 .input-group textarea:focus{border-color:#7c6ff7}
 
-/* Drop zone */
 .drop-zone{
   position:relative;border:2px dashed #7c6ff7;border-radius:12px;
   padding:2.5rem 1rem;text-align:center;cursor:pointer;
@@ -35,7 +34,6 @@ label{display:block;margin-bottom:.4rem;font-size:.85rem;color:#aaa}
 .drop-zone p span{color:#7c6ff7;font-weight:600}
 .drop-zone-input{position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer}
 
-/* File list */
 .file-list{list-style:none;margin-bottom:1.2rem}
 .file-list li{
   display:flex;align-items:center;justify-content:space-between;
@@ -50,11 +48,11 @@ label{display:block;margin-bottom:.4rem;font-size:.85rem;color:#aaa}
 }
 .file-list li .remove:hover{color:#ff6b6b}
 
-/* Submit */
 .btn-submit{
   width:100%;padding:.75rem;border:none;border-radius:10px;
   background:#7c6ff7;color:#fff;font-size:1rem;font-weight:600;
   cursor:pointer;transition:opacity .2s;position:relative;overflow:hidden;
+  margin-bottom:2rem;
 }
 .btn-submit:disabled{opacity:.4;cursor:not-allowed}
 .btn-submit:not(:disabled):hover{opacity:.88}
@@ -63,26 +61,22 @@ label{display:block;margin-bottom:.4rem;font-size:.85rem;color:#aaa}
   transition:width .3s;width:0;
 }
 
-/* Results */
-.results{list-style:none;margin-bottom:1.2rem}
-.results li{
+.history{list-style:none}
+.history li{
   display:flex;align-items:center;gap:.6rem;
   padding:.6rem .8rem;background:#16213e;border-radius:8px;margin-bottom:.4rem;
-  font-size:.88rem;animation:toastIn .3s ease;
+  font-size:.88rem;
 }
-.results li .status{flex-shrink:0;font-size:.85rem}
-.results li .status.done{color:#27ae60}
-.results li .status.error{color:#e74c3c}
-.results li .status.pending{color:#888}
-.results li .rname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.results li a{
+.history li .hname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.history li .expires{color:#888;font-size:.72rem;white-space:nowrap}
+.history li a{
   color:#7c6ff7;text-decoration:none;font-weight:600;flex-shrink:0;
   padding:.3rem .7rem;border:1px solid #7c6ff7;border-radius:6px;font-size:.8rem;
   transition:background .2s;
 }
-.results li a:hover{background:rgba(124,111,247,.15)}
+.history li a:hover{background:rgba(124,111,247,.15)}
+.history-empty{color:#666;font-size:.85rem;text-align:center;padding:1rem}
 
-/* Toast */
 .toast-container{position:fixed;bottom:1.5rem;right:1.5rem;display:flex;flex-direction:column;gap:.5rem;z-index:1000}
 .toast{
   padding:.7rem 1.1rem;border-radius:8px;font-size:.85rem;color:#fff;
@@ -104,6 +98,11 @@ label{display:block;margin-bottom:.4rem;font-size:.85rem;color:#aaa}
     <textarea id="watermarkText" rows="4" autocomplete="off"></textarea>
   </div>
 
+  <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:1rem;cursor:pointer;font-size:.9rem">
+    <input type="checkbox" id="applyWatermark" checked>
+    Apply watermark
+  </label>
+
   <div class="drop-zone" id="dropZone">
     <input class="drop-zone-input" type="file" id="fileInput" multiple
            accept=".pdf,.jpg,.jpeg,.png,.webp">
@@ -113,12 +112,15 @@ label{display:block;margin-bottom:.4rem;font-size:.85rem;color:#aaa}
 
   <ul class="file-list" id="fileList"></ul>
 
-  <ul class="results" id="resultsList" hidden></ul>
-
   <button class="btn-submit" id="submitBtn" disabled>
     <span class="btn-text">Apply Watermark</span>
     <div class="progress-bar" id="progressBar"></div>
   </button>
+
+  <h2>History</h2>
+  <ul class="history" id="historyList">
+    <li class="history-empty">No files yet</li>
+  </ul>
 </div>
 
 <div class="toast-container" id="toastContainer"></div>
@@ -135,15 +137,12 @@ const btnText = submitBtn.querySelector('.btn-text');
 const progressBar = document.getElementById('progressBar');
 const watermarkInput = document.getElementById('watermarkText');
 const toastContainer = document.getElementById('toastContainer');
+const historyList = document.getElementById('historyList');
 
-// --- Default text with today's date ---
+// --- Default text ---
 const today = new Date().toLocaleDateString('fr-FR');
 const defaultText = "Copie destinée à :\nUsage :\nDate : " + today;
 watermarkInput.value = defaultText;
-
-function flattenText(t) {
-  return t.split('\n').map(l => l.trim()).filter(Boolean).join(' — ');
-}
 
 // --- File handling ---
 function extOf(name) {
@@ -157,8 +156,8 @@ function formatSize(bytes) {
   return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
-function addFiles(fileListInput) {
-  for (const f of fileListInput) {
+function addFiles(fl) {
+  for (const f of fl) {
     if (!ALLOWED.has(extOf(f.name))) {
       showToast(`Skipped ${f.name} — unsupported type`, 'error');
       continue;
@@ -188,7 +187,7 @@ function renderFileList() {
   submitBtn.disabled = selectedFiles.length === 0;
 }
 
-// Drop zone events
+// Drop zone
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
 dropZone.addEventListener('drop', e => {
@@ -196,54 +195,38 @@ dropZone.addEventListener('drop', e => {
   dropZone.classList.remove('dragover');
   addFiles(e.dataTransfer.files);
 });
+fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value = ''; });
 
-fileInput.addEventListener('change', () => {
-  addFiles(fileInput.files);
-  fileInput.value = '';
-});
-
-// --- Results ---
-const resultsList = document.getElementById('resultsList');
-
-function addResultRow(name) {
-  const li = document.createElement('li');
-  li.innerHTML = `
-    <span class="status pending">⏳</span>
-    <span class="rname">${name}</span>
-    <span class="action" style="color:#888;font-size:.8rem">Processing…</span>`;
-  resultsList.appendChild(li);
-  return li;
+// --- History ---
+function formatExpiry(seconds) {
+  if (seconds <= 0) return 'expired';
+  const m = Math.ceil(seconds / 60);
+  return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}` : `${m}min`;
 }
 
-function watermarkedName(name) {
-  const dot = name.lastIndexOf('.');
-  if (dot < 0) return name + '_watermarked';
-  return name.slice(0, dot) + '_watermarked' + name.slice(dot);
+async function loadHistory() {
+  try {
+    const res = await fetch('/files');
+    const items = await res.json();
+    historyList.innerHTML = '';
+    if (items.length === 0) {
+      historyList.innerHTML = '<li class="history-empty">No files yet</li>';
+      return;
+    }
+    items.reverse();
+    for (const item of items) {
+      const li = document.createElement('li');
+      li.innerHTML = `
+        <span class="hname">${item.filename}</span>
+        <span class="expires">${formatExpiry(item.expires_in)}</span>
+        <a href="/files/${item.id}" download="${item.filename}">Save</a>`;
+      historyList.appendChild(li);
+    }
+  } catch (_) {}
 }
 
-const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-
-function setResultDone(li, name, blobUrl) {
-  li.querySelector('.status').className = 'status done';
-  li.querySelector('.status').textContent = '✓';
-  const action = li.querySelector('.action');
-  const a = document.createElement('a');
-  a.href = blobUrl;
-  a.download = watermarkedName(name);
-  if (!isIOS) {
-    a.target = '_blank';
-    a.rel = 'noopener';
-  }
-  a.textContent = 'Save';
-  action.replaceWith(a);
-}
-
-function setResultError(li, msg) {
-  li.querySelector('.status').className = 'status error';
-  li.querySelector('.status').textContent = '✗';
-  li.querySelector('.action').textContent = msg;
-  li.querySelector('.action').style.color = '#e74c3c';
-}
+loadHistory();
+setInterval(loadHistory, 30000);
 
 // --- Submit ---
 submitBtn.addEventListener('click', async () => {
@@ -254,36 +237,31 @@ submitBtn.addEventListener('click', async () => {
 
   submitBtn.disabled = true;
   progressBar.style.width = '0%';
-  resultsList.innerHTML = '';
-  resultsList.hidden = false;
 
   for (let i = 0; i < total; i++) {
     const f = selectedFiles[i];
     btnText.textContent = `Processing ${i + 1} / ${total}…`;
     progressBar.style.width = `${((i + 1) / total) * 100}%`;
 
-    const row = addResultRow(f.name);
     const form = new FormData();
     form.append('file', f);
     form.append('watermark_text', text);
+    form.append('apply', document.getElementById('applyWatermark').checked ? 'true' : 'false');
 
     try {
       const res = await fetch('/watermark', { method: 'POST', body: form });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
-        setResultError(row, err.detail || 'Error');
+        showToast(`${f.name}: ${err.detail || 'Error'}`, 'error');
         continue;
       }
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      setResultDone(row, f.name, url);
       success++;
     } catch (e) {
-      setResultError(row, 'Network error');
+      showToast(`${f.name}: Network error`, 'error');
     }
   }
 
+  progressBar.style.width = '100%';
   btnText.textContent = 'Apply Watermark';
   setTimeout(() => { progressBar.style.width = '0%'; }, 600);
 
@@ -292,6 +270,7 @@ submitBtn.addEventListener('click', async () => {
   }
   selectedFiles = [];
   renderFileList();
+  loadHistory();
 });
 
 // --- Toasts ---
