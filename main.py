@@ -162,7 +162,7 @@ async def watermark(
     return StreamingResponse(
         result,
         media_type=MEDIA_TYPES.get(ext, "application/octet-stream"),
-        headers={"Content-Disposition": f'inline; filename="watermarked_{filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="{Path(filename).stem}_watermarked{ext}"'},
     )
 
 

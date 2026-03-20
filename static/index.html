@@ -215,15 +215,22 @@ function addResultRow(name) {
   return li;
 }
 
+function watermarkedName(name) {
+  const dot = name.lastIndexOf('.');
+  if (dot < 0) return name + '_watermarked';
+  return name.slice(0, dot) + '_watermarked' + name.slice(dot);
+}
+
 function setResultDone(li, name, blobUrl) {
   li.querySelector('.status').className = 'status done';
   li.querySelector('.status').textContent = '✓';
   const action = li.querySelector('.action');
   const a = document.createElement('a');
   a.href = blobUrl;
+  a.download = watermarkedName(name);
   a.target = '_blank';
   a.rel = 'noopener';
-  a.textContent = 'Open';
+  a.textContent = 'Save';
   action.replaceWith(a);
 }
 
