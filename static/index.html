@@ -229,49 +229,40 @@ loadHistory();
 setInterval(loadHistory, 30000);
 
 // --- Submit ---
-submitBtn.addEventListener('click', async () => {
+submitBtn.addEventListener('click', () => {
   if (selectedFiles.length === 0) return;
   const text = watermarkInput.value.trim() || '';
+  const apply = document.getElementById('applyWatermark').checked ? 'true' : 'false';
   const total = selectedFiles.length;
-  let success = 0;
 
+  btnText.textContent = `Uploading ${total} file${total > 1 ? 's' : ''}…`;
   submitBtn.disabled = true;
-  progressBar.style.width = '0%';
 
-  for (let i = 0; i < total; i++) {
-    const f = selectedFiles[i];
-    btnText.textContent = `Processing ${i + 1} / ${total}…`;
-    progressBar.style.width = `${((i + 1) / total) * 100}%`;
-
+  // Fire all uploads in parallel, don't await
+  for (const f of selectedFiles) {
     const form = new FormData();
     form.append('file', f);
     form.append('watermark_text', text);
-    form.append('apply', document.getElementById('applyWatermark').checked ? 'true' : 'false');
-
-    try {
-      const res = await fetch('/watermark', { method: 'POST', body: form });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }));
-        showToast(`${f.name}: ${err.detail || 'Error'}`, 'error');
-        continue;
-      }
-      success++;
-      loadHistory();
-    } catch (e) {
-      showToast(`${f.name}: Network error`, 'error');
-    }
+    form.append('apply', apply);
+    fetch('/watermark', { method: 'POST', body: form })
+      .then(res => {
+        if (!res.ok) return res.json().then(e => showToast(`${f.name}: ${e.detail || 'Error'}`, 'error'));
+        loadHistory();
+      })
+      .catch(() => showToast(`${f.name}: Network error`, 'error'));
   }
 
-  progressBar.style.width = '100%';
-  btnText.textContent = 'Apply Watermark';
-  setTimeout(() => { progressBar.style.width = '0%'; }, 600);
-
-  if (success > 0) {
-    showToast(`${success} file${success > 1 ? 's' : ''} ready`, 'success');
-  }
+  showToast(`${total} file${total > 1 ? 's' : ''} sent for processing`, 'success');
   selectedFiles = [];
   renderFileList();
-  loadHistory();
+  btnText.textContent = 'Apply Watermark';
+
+  // Poll history more frequently while processing
+  let polls = 0;
+  const pollId = setInterval(() => {
+    loadHistory();
+    if (++polls >= 30) clearInterval(pollId);
+  }, 2000);
 });
 
 // --- Toasts ---
