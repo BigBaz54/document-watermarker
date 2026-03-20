@@ -52,11 +52,15 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     return ImageFont.load_default(size)
 
 
-def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
+def create_watermark_overlay(
+    width: int, height: int, text: str, dpi: int = 96
+) -> Image.Image:
     """Create a transparent overlay with diagonal tiled watermark text."""
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    # Scale font to ~2.5% of the smaller dimension
-    font_size = min(width, height) // 40
+    # Scale font: target ~2.5% of the smaller dimension at 96 DPI.
+    # At higher DPI (PDF rasterization), there are more pixels per inch
+    # so we scale down proportionally to keep the same physical size.
+    font_size = max(16, int(min(width, height) / 40 * 96 / dpi))
     font = _load_font(font_size)
 
     # Measure text size
@@ -85,20 +89,24 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
         ImageDraw.Draw(stamp).text((tx, ty), text, font=font, fill=color)
         stamps.append(stamp.rotate(45, resample=Image.BICUBIC, expand=False))
 
-    # Tile with brick pattern, alternating colors, some rows wavy
+    # Tile with varied X offset per row so text never aligns in columns
+    # and every part of the phrase is visible somewhere on the image
     step_x = int(text_w * 1.8)
     step_y = int(text_h * 4.0)
-    offset_x = step_x // 2
     wave_amplitude = text_h * 1.5
-    wave_period = text_w * 3
+
+    # Use golden ratio to spread row offsets evenly across step_x
+    golden = (math.sqrt(5) - 1) / 2
 
     margin = stamp_size
     row = 0
     y = -margin
     while y < height + margin:
         s = stamps[row % len(stamps)]
-        wavy = row % 3 == 1  # every 3rd row is wavy
-        x = -margin + (offset_x if row % 2 else 0)
+        wavy = row % 3 == 1
+        # Each row starts at a different X offset (golden ratio distribution)
+        row_offset = int((row * golden % 1) * step_x)
+        x = -margin - step_x + row_offset
         col = 0
         while x < width + margin:
             dy = int(math.sin(col * 2 * math.pi / 6) * wave_amplitude) if wavy else 0
@@ -111,15 +119,14 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
     return overlay
 
 
-def apply_watermark_to_image(image: Image.Image, text: str) -> Image.Image:
+def apply_watermark_to_image(
+    image: Image.Image, text: str, dpi: int = 96
+) -> Image.Image:
     """Apply watermark overlay to a PIL Image."""
-    log.info("Watermarking image: mode=%s size=%sx%s", image.mode, image.width, image.height)
-    # Force load pixel data (some images are lazy-loaded)
+    log.info("Watermarking image: mode=%s size=%sx%s dpi=%d", image.mode, image.width, image.height, dpi)
     image.load()
-    # Flatten to RGB first to handle all modes (P, L, LA, CMYK, I, etc.)
-    # then convert to RGBA for compositing
     image = image.convert("RGB").convert("RGBA")
-    overlay = create_watermark_overlay(image.width, image.height, text)
+    overlay = create_watermark_overlay(image.width, image.height, text, dpi=dpi)
     return Image.alpha_composite(image, overlay)
 
 
@@ -152,7 +159,7 @@ def process_pdf(data: bytes, text: str) -> io.BytesIO:
         img = img.convert("RGBA")
         key = (img.width, img.height)
         if key not in overlay_cache:
-            overlay_cache[key] = create_watermark_overlay(img.width, img.height, text)
+            overlay_cache[key] = create_watermark_overlay(img.width, img.height, text, dpi=RASTERIZE_DPI)
         img = Image.alpha_composite(img, overlay_cache[key])
         img = img.convert("RGB")
         watermarked_pages.append(img)
