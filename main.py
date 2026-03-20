@@ -15,8 +15,8 @@ from PIL import Image, ImageDraw, ImageFont
 WATERMARK_TEXT = os.getenv("WATERMARK_TEXT", "CONFIDENTIEL")
 RASTERIZE_DPI = int(os.getenv("RASTERIZE_DPI", "300"))
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
-WATERMARK_FONT_SIZE = int(os.getenv("WATERMARK_FONT_SIZE", "48"))
-WATERMARK_OPACITY = int(os.getenv("WATERMARK_OPACITY", "40"))
+WATERMARK_FONT_SIZE = int(os.getenv("WATERMARK_FONT_SIZE", "80"))
+WATERMARK_OPACITY = int(os.getenv("WATERMARK_OPACITY", "64"))
 
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
@@ -52,7 +52,10 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
     """Create a transparent overlay with diagonal tiled watermark text."""
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    font = _load_font(WATERMARK_FONT_SIZE)
+    # Scale font size relative to image — at least WATERMARK_FONT_SIZE,
+    # but grow for high-res images so the watermark stays visible
+    font_size = max(WATERMARK_FONT_SIZE, min(width, height) // 20)
+    font = _load_font(font_size)
 
     # Measure text size
     tmp = Image.new("RGBA", (1, 1))
