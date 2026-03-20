@@ -150,9 +150,7 @@ const toastContainer = document.getElementById('toastContainer');
 
 // --- Default text with today's date ---
 const today = new Date().toLocaleDateString('fr-FR');
-const defaultText = `Copie destinée à :
-Usage :
-Date : ${today}`;
+const defaultText = "Copie destinée à :\nUsage :\nDate : " + today;
 watermarkInput.value = defaultText;
 
 function flattenText(t) {
@@ -192,7 +190,6 @@ function drawPreview() {
     const dy = wavy ? Math.sin(row * 2 * Math.PI / 6) * waveAmp : 0;
     ctx.fillStyle = colors[row % colors.length];
     ctx.fillText(line, -diag, cy + dy);
-    }
   }
   ctx.restore();
 }
