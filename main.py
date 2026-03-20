@@ -51,10 +51,17 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     return ImageFont.load_default(size)
 
 
+WATERMARK_ROWS = int(os.getenv("WATERMARK_ROWS", "6"))
+
+
 def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
     """Create a transparent overlay with diagonal tiled watermark text."""
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    font_size = max(16, min(width, height) // 25)
+
+    # Fixed number of rows → font size and spacing derive from image height
+    num_rows = WATERMARK_ROWS
+    step_y = height // num_rows
+    font_size = max(12, step_y // 4)
     font = _load_font(font_size)
 
     # Measure text
@@ -83,29 +90,24 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
         ImageDraw.Draw(stamp).text((tx, ty), text, font=font, fill=color)
         stamps.append(stamp.rotate(45, resample=Image.BICUBIC, expand=False))
 
-    step_x = int(text_w * 1.8)
-    step_y = stamp_size + text_h * 2
-    wave_amplitude = text_h * 1.5
-
-    # Shift each row by 1/4 of step_x so text starts at different positions
-    # and every part of the phrase is readable somewhere
-    shift = step_x // 4
+    step_x = int(text_w * 1.5)
+    # Each row offset = 1/num_rows of image width
+    row_shift = width // num_rows
+    wave_amplitude = step_y // 6
 
     margin = stamp_size
-    row = 0
-    y = -margin
-    while y < height + margin:
+    for row in range(num_rows + 4):
+        y = -margin + row * step_y
         s = stamps[row % len(stamps)]
         wavy = row % 3 == 1
-        x = -margin - step_x + (row % 4) * shift
+        x_start = -margin + (row % num_rows) * row_shift
+        x = x_start - step_x
         col = 0
         while x < width + margin:
             dy = int(math.sin(col * 2 * math.pi / 6) * wave_amplitude) if wavy else 0
             overlay.paste(s, (x, y + dy), s)
             x += step_x
             col += 1
-        y += step_y
-        row += 1
 
     return overlay
 
