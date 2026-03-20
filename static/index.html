@@ -221,6 +221,8 @@ function watermarkedName(name) {
   return name.slice(0, dot) + '_watermarked' + name.slice(dot);
 }
 
+const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
 function setResultDone(li, name, blobUrl) {
   li.querySelector('.status').className = 'status done';
   li.querySelector('.status').textContent = '✓';
@@ -228,8 +230,10 @@ function setResultDone(li, name, blobUrl) {
   const a = document.createElement('a');
   a.href = blobUrl;
   a.download = watermarkedName(name);
-  a.target = '_blank';
-  a.rel = 'noopener';
+  if (!isIOS) {
+    a.target = '_blank';
+    a.rel = 'noopener';
+  }
   a.textContent = 'Save';
   action.replaceWith(a);
 }
