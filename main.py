@@ -19,7 +19,7 @@ WATERMARK_TEXT = os.getenv("WATERMARK_TEXT", "Copie destinée à : — Usage : �
 RASTERIZE_DPI = int(os.getenv("RASTERIZE_DPI", "300"))
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 WATERMARK_FONT_SIZE = int(os.getenv("WATERMARK_FONT_SIZE", "48"))
-WATERMARK_OPACITY = int(os.getenv("WATERMARK_OPACITY", "90"))
+WATERMARK_OPACITY = int(os.getenv("WATERMARK_OPACITY", "110"))
 
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
@@ -27,7 +27,6 @@ ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".webp"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 FONT_PATHS = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 ]
 
@@ -85,7 +84,7 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
         stamps.append(stamp.rotate(45, resample=Image.BICUBIC, expand=False))
 
     step_x = int(text_w * 1.8)
-    step_y = int(text_h * 4.0)
+    step_y = stamp_size + text_h * 2
     wave_amplitude = text_h * 1.5
 
     # Shift each row by 1/4 of step_x so text starts at different positions
