@@ -1,4 +1,5 @@
 import io
+import logging
 import math
 import os
 from pathlib import Path
@@ -9,13 +10,15 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageDraw, ImageFont
 
+log = logging.getLogger("uvicorn.error")
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 WATERMARK_TEXT = os.getenv("WATERMARK_TEXT", "CONFIDENTIEL")
 RASTERIZE_DPI = int(os.getenv("RASTERIZE_DPI", "300"))
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
-WATERMARK_FONT_SIZE = int(os.getenv("WATERMARK_FONT_SIZE", "80"))
+WATERMARK_FONT_SIZE = int(os.getenv("WATERMARK_FONT_SIZE", "48"))
 WATERMARK_OPACITY = int(os.getenv("WATERMARK_OPACITY", "64"))
 
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
@@ -52,9 +55,8 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
     """Create a transparent overlay with diagonal tiled watermark text."""
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    # Scale font size relative to image — at least WATERMARK_FONT_SIZE,
-    # but grow for high-res images so the watermark stays visible
-    font_size = max(WATERMARK_FONT_SIZE, min(width, height) // 20)
+    # Scale font to ~2.5% of the smaller dimension
+    font_size = max(WATERMARK_FONT_SIZE, min(width, height) // 40)
     font = _load_font(font_size)
 
     # Measure text size
@@ -95,8 +97,12 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
 
 def apply_watermark_to_image(image: Image.Image, text: str) -> Image.Image:
     """Apply watermark overlay to a PIL Image."""
-    if image.mode != "RGBA":
-        image = image.convert("RGBA")
+    log.info("Watermarking image: mode=%s size=%sx%s", image.mode, image.width, image.height)
+    # Force load pixel data (some images are lazy-loaded)
+    image.load()
+    # Flatten to RGB first to handle all modes (P, L, LA, CMYK, I, etc.)
+    # then convert to RGBA for compositing
+    image = image.convert("RGB").convert("RGBA")
     overlay = create_watermark_overlay(image.width, image.height, text)
     return Image.alpha_composite(image, overlay)
 
