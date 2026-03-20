@@ -68,20 +68,14 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
     line = (text + sep) * 4
 
     colors = [(*c, WATERMARK_OPACITY) for c in WATERMARK_COLORS]
-    wave_amplitude = step_y // 2
 
-    # Draw text flat on an oversized canvas, then rotate once
     diag = int(math.sqrt(width**2 + height**2))
     canvas = Image.new("RGBA", (diag * 2, diag * 2), (0, 0, 0, 0))
     cdraw = ImageDraw.Draw(canvas)
 
     total_rows = diag * 2 // step_y + 1
     for row in range(total_rows):
-        color = colors[row % len(colors)]
-        cy = row * step_y
-        wavy = row % 3 == 1
-        dy = int(math.sin(row * 2 * math.pi / 6) * wave_amplitude) if wavy else 0
-        cdraw.text((0, cy + dy), line, font=font, fill=color)
+        cdraw.text((0, row * step_y), line, font=font, fill=colors[row % len(colors)])
 
     canvas = canvas.rotate(30, resample=Image.BICUBIC, expand=False)
     cx, cy = canvas.width // 2, canvas.height // 2
