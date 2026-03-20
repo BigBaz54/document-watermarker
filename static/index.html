@@ -150,7 +150,9 @@ const toastContainer = document.getElementById('toastContainer');
 
 // --- Default text with today's date ---
 const today = new Date().toLocaleDateString('fr-FR');
-const defaultText = `Copie destinée à :\nUsage :\nDate : ${today}`;
+const defaultText = `Copie destinée à :
+Usage :
+Date : ${today}`;
 watermarkInput.value = defaultText;
 
 function flattenText(t) {
