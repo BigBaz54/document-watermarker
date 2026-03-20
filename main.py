@@ -56,7 +56,7 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
     """Create a transparent overlay with diagonal tiled watermark text."""
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     # Scale font to ~2.5% of the smaller dimension
-    font_size = max(WATERMARK_FONT_SIZE, min(width, height) // 40)
+    font_size = min(width, height) // 40
     font = _load_font(font_size)
 
     # Measure text size
@@ -82,7 +82,7 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
     step_x = int(text_w * 1.8)
     step_y = int(text_h * 4.0)
 
-    # Extend beyond bounds to cover corners
+    # Extend beyond bounds to cover corners after rotation
     margin = stamp_size
     y = -margin
     while y < height + margin:
