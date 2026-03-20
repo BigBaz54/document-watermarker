@@ -2,6 +2,7 @@ import io
 import logging
 import math
 import os
+from datetime import date
 from pathlib import Path
 
 import fitz
@@ -18,18 +19,12 @@ log = logging.getLogger("uvicorn.error")
 WATERMARK_TEXT = os.getenv("WATERMARK_TEXT", "Copie destinée à : — Usage : — Date : {date}")
 RASTERIZE_DPI = int(os.getenv("RASTERIZE_DPI", "300"))
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
-WATERMARK_FONT_SIZE = int(os.getenv("WATERMARK_FONT_SIZE", "48"))
 WATERMARK_OPACITY = int(os.getenv("WATERMARK_OPACITY", "110"))
+WATERMARK_ROWS = int(os.getenv("WATERMARK_ROWS", "8"))
 
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
-
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".webp"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-
-FONT_PATHS = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-]
-
 MEDIA_TYPES = {
     ".pdf": "application/pdf",
     ".jpg": "image/jpeg",
@@ -37,6 +32,14 @@ MEDIA_TYPES = {
     ".png": "image/png",
     ".webp": "image/webp",
 }
+FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+A4_RATIO = 1.4142
+WATERMARK_COLORS = [
+    (0, 0, 180),
+    (180, 0, 0),
+    (0, 0, 0),
+    (128, 128, 128),
+]
 
 # ---------------------------------------------------------------------------
 # App
@@ -45,99 +48,56 @@ app = FastAPI(title="Document Watermarker")
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    for path in FONT_PATHS:
-        if os.path.exists(path):
-            return ImageFont.truetype(path, size)
+    if os.path.exists(FONT_PATH):
+        return ImageFont.truetype(FONT_PATH, size)
     return ImageFont.load_default(size)
-
-
-WATERMARK_ROWS = int(os.getenv("WATERMARK_ROWS", "8"))
 
 
 def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
     """Create a transparent overlay with diagonal tiled watermark text."""
-    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    # Normalize: if landscape, compute as if placed in a portrait A4 page
+    ref = int(width * A4_RATIO) if width > height else height
 
-    # If landscape, compute as if the image were placed in a portrait A4 page:
-    # the long side fills the page width, height = long side × A4 ratio (√2)
-    A4_RATIO = 1.4142
-    if width > height:
-        ref = int(width * A4_RATIO)
-    else:
-        ref = height
     num_rows = WATERMARK_ROWS
     step_y = ref // num_rows
     font_size = max(12, step_y // 6)
     font = _load_font(font_size)
 
     # Measure text
-    tmp = Image.new("RGBA", (1, 1))
-    draw = ImageDraw.Draw(tmp)
-    bbox = draw.textbbox((0, 0), text, font=font)
+    bbox = ImageDraw.Draw(Image.new("RGBA", (1, 1))).textbbox((0, 0), text, font=font)
     text_w = bbox[2] - bbox[0]
-    text_h = bbox[3] - bbox[1]
 
-    # Colors: blue, red, black, grey
-    colors = [
-        (0, 0, 180, WATERMARK_OPACITY),
-        (180, 0, 0, WATERMARK_OPACITY),
-        (0, 0, 0, WATERMARK_OPACITY),
-        (128, 128, 128, WATERMARK_OPACITY),
-    ]
-
-    # Create one rotated stamp per color
-    padding = 20
-    stamp_size = int(math.sqrt((text_w + padding) ** 2 + (text_h + padding) ** 2)) + 4
-    tx = (stamp_size - text_w) // 2
-    ty = (stamp_size - text_h) // 2
-    stamps = []
-    for color in colors:
-        stamp = Image.new("RGBA", (stamp_size, stamp_size), (0, 0, 0, 0))
-        ImageDraw.Draw(stamp).text((tx, ty), text, font=font, fill=color)
-        stamps.append(stamp.rotate(30, resample=Image.BICUBIC, expand=False))
-
+    colors = [(*c, WATERMARK_OPACITY) for c in WATERMARK_COLORS]
     step_x = int(text_w * 1.1)
     wave_amplitude = step_y // 8
-
-    # Each row gets a horizontal offset that progresses across the image width
-    # spread evenly so every part of the text is visible somewhere
     row_shift = step_x // num_rows
 
-    # Total rows needed to cover image height (ref may be taller than image)
-    total_rows = height // step_y + 2
-    margin_x = stamp_size
+    # Draw text flat on an oversized canvas, then rotate once
+    diag = int(math.sqrt(width**2 + height**2))
+    canvas = Image.new("RGBA", (diag * 2, diag * 2), (0, 0, 0, 0))
+    cdraw = ImageDraw.Draw(canvas)
 
+    total_rows = diag * 2 // step_y + 1
     for row in range(total_rows):
-        band_top = row * step_y
-        band_bottom = band_top + step_y
-        # Create a band overlay so stamps don't bleed into adjacent bands
-        band = Image.new("RGBA", (width, step_y), (0, 0, 0, 0))
-        s = stamps[row % len(stamps)]
+        color = colors[row % len(colors)]
+        cy = row * step_y
         wavy = row % 3 == 1
-        # Offset progresses by row_shift each row
-        x_offset = (row % num_rows) * row_shift
-        x = -margin_x + x_offset
+        x = (row % num_rows) * row_shift
         col = 0
-        cy = (step_y - stamp_size) // 2  # center stamp vertically in band
-        while x < width + margin_x:
+        while x < diag * 2:
             dy = int(math.sin(col * 2 * math.pi / 6) * wave_amplitude) if wavy else 0
-            band.paste(s, (x, cy + dy), s)
+            cdraw.text((x, cy + dy), text, font=font, fill=color)
             x += step_x
             col += 1
-        # Paste band into overlay, clipped to image bounds
-        paste_y = max(0, band_top)
-        crop_top = paste_y - band_top
-        crop_bottom = min(step_y, height - band_top)
-        if crop_bottom > crop_top:
-            cropped = band.crop((0, crop_top, width, crop_bottom))
-            overlay.paste(cropped, (0, paste_y), cropped)
 
-    return overlay
+    canvas = canvas.rotate(30, resample=Image.BICUBIC, expand=False)
+    cx, cy = canvas.width // 2, canvas.height // 2
+    return canvas.crop((cx - width // 2, cy - height // 2,
+                        cx - width // 2 + width, cy - height // 2 + height))
 
 
-def apply_watermark_to_image(image: Image.Image, text: str) -> Image.Image:
+def apply_watermark(image: Image.Image, text: str) -> Image.Image:
     """Apply watermark overlay to a PIL Image."""
-    log.info("Watermarking image: mode=%s size=%sx%s", image.mode, image.width, image.height)
     image.load()
     image = image.convert("RGB").convert("RGBA")
     overlay = create_watermark_overlay(image.width, image.height, text)
@@ -145,14 +105,11 @@ def apply_watermark_to_image(image: Image.Image, text: str) -> Image.Image:
 
 
 def process_image(data: bytes, ext: str, text: str) -> io.BytesIO:
-    """Watermark a single image and return bytes in the same format."""
-    image = Image.open(io.BytesIO(data))
-    watermarked = apply_watermark_to_image(image, text)
-
+    """Watermark a single image, return bytes in the same format."""
+    watermarked = apply_watermark(Image.open(io.BytesIO(data)), text)
     output = io.BytesIO()
     if ext in (".jpg", ".jpeg"):
-        watermarked = watermarked.convert("RGB")
-        watermarked.save(output, format="JPEG", quality=95)
+        watermarked.convert("RGB").save(output, format="JPEG", quality=95)
     elif ext == ".png":
         watermarked.save(output, format="PNG")
     elif ext == ".webp":
@@ -164,33 +121,24 @@ def process_image(data: bytes, ext: str, text: str) -> io.BytesIO:
 def process_pdf(data: bytes, text: str) -> io.BytesIO:
     """Rasterise every PDF page, apply watermark, rebuild as image-only PDF."""
     doc = fitz.open(stream=data, filetype="pdf")
-    watermarked_pages: list[Image.Image] = []
+    pages: list[Image.Image] = []
     overlay_cache: dict[tuple[int, int], Image.Image] = {}
 
     for page in doc:
         pix = page.get_pixmap(dpi=RASTERIZE_DPI)
-        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        img = img.convert("RGBA")
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples).convert("RGBA")
         key = (img.width, img.height)
         if key not in overlay_cache:
             overlay_cache[key] = create_watermark_overlay(img.width, img.height, text)
-        img = Image.alpha_composite(img, overlay_cache[key])
-        img = img.convert("RGB")
-        watermarked_pages.append(img)
-
+        img = Image.alpha_composite(img, overlay_cache[key]).convert("RGB")
+        pages.append(img)
     doc.close()
 
     output = io.BytesIO()
-    if len(watermarked_pages) == 1:
-        watermarked_pages[0].save(output, format="PDF", resolution=RASTERIZE_DPI)
-    else:
-        watermarked_pages[0].save(
-            output,
-            format="PDF",
-            save_all=True,
-            append_images=watermarked_pages[1:],
-            resolution=RASTERIZE_DPI,
-        )
+    pages[0].save(
+        output, format="PDF", resolution=RASTERIZE_DPI,
+        save_all=len(pages) > 1, append_images=pages[1:] if len(pages) > 1 else [],
+    )
     output.seek(0)
     return output
 
@@ -209,55 +157,31 @@ async def watermark(
     watermark_text: str = Form(default=""),
 ):
     text = watermark_text.strip() or WATERMARK_TEXT
-    # Flatten multiline input to single line
     text = " — ".join(line.strip() for line in text.splitlines() if line.strip())
-    # Replace {date} placeholder with today's date
     if "{date}" in text:
-        from datetime import date
         text = text.replace("{date}", date.today().strftime("%d/%m/%Y"))
 
-    # Validate extension
     filename = file.filename or "file"
     ext = Path(filename).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file type: {ext}. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
-        )
+        raise HTTPException(400, f"Unsupported file type: {ext}")
 
-    # Read and validate size
     data = await file.read()
     if len(data) > MAX_FILE_SIZE_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File exceeds {MAX_FILE_SIZE_MB} MB limit.",
-        )
+        raise HTTPException(413, f"File exceeds {MAX_FILE_SIZE_MB} MB limit.")
 
-    # Process
-    if ext in IMAGE_EXTENSIONS:
-        result = process_image(data, ext, text)
-    else:
-        result = process_pdf(data, text)
-
-    out_name = f"watermarked_{filename}"
-    media_type = MEDIA_TYPES.get(ext, "application/octet-stream")
+    result = process_image(data, ext, text) if ext in IMAGE_EXTENSIONS else process_pdf(data, text)
 
     return StreamingResponse(
         result,
-        media_type=media_type,
-        headers={"Content-Disposition": f'inline; filename="{out_name}"'},
+        media_type=MEDIA_TYPES.get(ext, "application/octet-stream"),
+        headers={"Content-Disposition": f'inline; filename="watermarked_{filename}"'},
     )
 
 
-# ---------------------------------------------------------------------------
 # Static files (must be last so API routes take priority)
-# ---------------------------------------------------------------------------
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
-# ---------------------------------------------------------------------------
-# Dev entry point
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
