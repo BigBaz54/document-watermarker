@@ -193,7 +193,7 @@ async def watermark(
     return StreamingResponse(
         result,
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{out_name}"'},
+        headers={"Content-Disposition": f'inline; filename="{out_name}"'},
     )
 
 
