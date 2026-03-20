@@ -68,7 +68,7 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
     line = (text + sep) * 4
 
     colors = [(*c, WATERMARK_OPACITY) for c in WATERMARK_COLORS]
-    wave_amplitude = step_y // 4
+    wave_amplitude = step_y // 2
 
     # Draw text flat on an oversized canvas, then rotate once
     diag = int(math.sqrt(width**2 + height**2))
