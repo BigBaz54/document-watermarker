@@ -19,8 +19,8 @@ log = logging.getLogger("uvicorn.error")
 WATERMARK_TEXT = os.getenv("WATERMARK_TEXT", "Copie destinée à : — Usage : — Date : {date}")
 RASTERIZE_DPI = int(os.getenv("RASTERIZE_DPI", "300"))
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
-WATERMARK_OPACITY = int(os.getenv("WATERMARK_OPACITY", "110"))
-WATERMARK_ROWS = int(os.getenv("WATERMARK_ROWS", "8"))
+WATERMARK_OPACITY = int(os.getenv("WATERMARK_OPACITY", "100"))
+WATERMARK_ROWS = int(os.getenv("WATERMARK_ROWS", "6"))
 
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".webp"}
@@ -38,7 +38,7 @@ WATERMARK_COLORS = [
     (0, 0, 180),
     (180, 0, 0),
     (0, 0, 0),
-    (128, 128, 128),
+    (96, 96, 96),
 ]
 
 # ---------------------------------------------------------------------------
