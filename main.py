@@ -60,17 +60,15 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
 
     num_rows = WATERMARK_ROWS
     step_y = ref // num_rows
-    font_size = max(12, step_y // 6)
+    font_size = max(12, step_y // 10)
     font = _load_font(font_size)
 
-    # Measure text
-    bbox = ImageDraw.Draw(Image.new("RGBA", (1, 1))).textbbox((0, 0), text, font=font)
-    text_w = bbox[2] - bbox[0]
+    # Build one long repeated line: "text     text     text     text"
+    sep = "     "
+    line = (text + sep) * 4
 
     colors = [(*c, WATERMARK_OPACITY) for c in WATERMARK_COLORS]
-    step_x = int(text_w * 1.1)
-    wave_amplitude = step_y // 8
-    row_shift = step_x // num_rows
+    wave_amplitude = step_y // 4
 
     # Draw text flat on an oversized canvas, then rotate once
     diag = int(math.sqrt(width**2 + height**2))
@@ -82,13 +80,8 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
         color = colors[row % len(colors)]
         cy = row * step_y
         wavy = row % 3 == 1
-        x = (row % num_rows) * row_shift
-        col = 0
-        while x < diag * 2:
-            dy = int(math.sin(col * 2 * math.pi / 6) * wave_amplitude) if wavy else 0
-            cdraw.text((x, cy + dy), text, font=font, fill=color)
-            x += step_x
-            col += 1
+        dy = int(math.sin(row * 2 * math.pi / 6) * wave_amplitude) if wavy else 0
+        cdraw.text((0, cy + dy), line, font=font, fill=color)
 
     canvas = canvas.rotate(30, resample=Image.BICUBIC, expand=False)
     cx, cy = canvas.width // 2, canvas.height // 2
