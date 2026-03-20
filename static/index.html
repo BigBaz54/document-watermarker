@@ -69,6 +69,25 @@ label{display:block;margin-bottom:.4rem;font-size:.85rem;color:#aaa}
   transition:width .3s;width:0;
 }
 
+/* Results */
+.results{list-style:none;margin-bottom:1.2rem}
+.results li{
+  display:flex;align-items:center;gap:.6rem;
+  padding:.6rem .8rem;background:#16213e;border-radius:8px;margin-bottom:.4rem;
+  font-size:.88rem;animation:toastIn .3s ease;
+}
+.results li .status{flex-shrink:0;font-size:.85rem}
+.results li .status.done{color:#27ae60}
+.results li .status.error{color:#e74c3c}
+.results li .status.pending{color:#888}
+.results li .rname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.results li a{
+  color:#7c6ff7;text-decoration:none;font-weight:600;flex-shrink:0;
+  padding:.3rem .7rem;border:1px solid #7c6ff7;border-radius:6px;font-size:.8rem;
+  transition:background .2s;
+}
+.results li a:hover{background:rgba(124,111,247,.15)}
+
 /* Toast */
 .toast-container{position:fixed;bottom:1.5rem;right:1.5rem;display:flex;flex-direction:column;gap:.5rem;z-index:1000}
 .toast{
@@ -103,6 +122,8 @@ label{display:block;margin-bottom:.4rem;font-size:.85rem;color:#aaa}
   </div>
 
   <ul class="file-list" id="fileList"></ul>
+
+  <ul class="results" id="resultsList" hidden></ul>
 
   <button class="btn-submit" id="submitBtn" disabled>
     <span class="btn-text">Apply Watermark</span>
@@ -221,6 +242,38 @@ fileInput.addEventListener('change', () => {
   fileInput.value = '';
 });
 
+// --- Results ---
+const resultsList = document.getElementById('resultsList');
+
+function addResultRow(name) {
+  const li = document.createElement('li');
+  li.innerHTML = `
+    <span class="status pending">⏳</span>
+    <span class="rname">${name}</span>
+    <span class="action" style="color:#888;font-size:.8rem">Processing…</span>`;
+  resultsList.appendChild(li);
+  return li;
+}
+
+function setResultDone(li, name, blobUrl) {
+  li.querySelector('.status').className = 'status done';
+  li.querySelector('.status').textContent = '✓';
+  const action = li.querySelector('.action');
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.target = '_blank';
+  a.download = `watermarked_${name}`;
+  a.textContent = 'Open';
+  action.replaceWith(a);
+}
+
+function setResultError(li, msg) {
+  li.querySelector('.status').className = 'status error';
+  li.querySelector('.status').textContent = '✗';
+  li.querySelector('.action').textContent = msg;
+  li.querySelector('.action').style.color = '#e74c3c';
+}
+
 // --- Submit ---
 submitBtn.addEventListener('click', async () => {
   if (selectedFiles.length === 0) return;
@@ -230,12 +283,15 @@ submitBtn.addEventListener('click', async () => {
 
   submitBtn.disabled = true;
   progressBar.style.width = '0%';
+  resultsList.innerHTML = '';
+  resultsList.hidden = false;
 
   for (let i = 0; i < total; i++) {
     const f = selectedFiles[i];
     btnText.textContent = `Processing ${i + 1} / ${total}…`;
-    progressBar.style.width = `${((i) / total) * 100}%`;
+    progressBar.style.width = `${((i + 1) / total) * 100}%`;
 
+    const row = addResultRow(f.name);
     const form = new FormData();
     form.append('file', f);
     form.append('watermark_text', text);
@@ -244,39 +300,24 @@ submitBtn.addEventListener('click', async () => {
       const res = await fetch('/watermark', { method: 'POST', body: form });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
-        showToast(`${f.name}: ${err.detail || 'Error'}`, 'error');
+        setResultError(row, err.detail || 'Error');
         continue;
       }
 
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-      if (isMobile) {
-        window.open(url, '_blank');
-      } else {
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `watermarked_${f.name}`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      }
+      setResultDone(row, f.name, url);
       success++;
-
-      // Small delay between downloads
-      if (i < total - 1) await new Promise(r => setTimeout(r, 500));
     } catch (e) {
-      showToast(`${f.name}: Network error`, 'error');
+      setResultError(row, 'Network error');
     }
   }
 
-  progressBar.style.width = '100%';
   btnText.textContent = 'Apply Watermark';
   setTimeout(() => { progressBar.style.width = '0%'; }, 600);
 
   if (success > 0) {
-    showToast(`${success} file${success > 1 ? 's' : ''} watermarked`, 'success');
+    showToast(`${success} file${success > 1 ? 's' : ''} ready`, 'success');
   }
   selectedFiles = [];
   renderFileList();
