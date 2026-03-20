@@ -58,9 +58,15 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
     """Create a transparent overlay with diagonal tiled watermark text."""
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
 
-    # Fixed number of rows → font size and spacing derive from image height
+    # If landscape, compute as if the image were placed in a portrait A4 page:
+    # the long side fills the page width, height = long side × A4 ratio (√2)
+    A4_RATIO = 1.4142
+    if width > height:
+        ref = int(width * A4_RATIO)
+    else:
+        ref = height
     num_rows = WATERMARK_ROWS
-    step_y = height // num_rows
+    step_y = ref // num_rows
     font_size = max(12, step_y // 4)
     font = _load_font(font_size)
 
@@ -90,7 +96,7 @@ def create_watermark_overlay(width: int, height: int, text: str) -> Image.Image:
         ImageDraw.Draw(stamp).text((tx, ty), text, font=font, fill=color)
         stamps.append(stamp.rotate(45, resample=Image.BICUBIC, expand=False))
 
-    step_x = int(text_w * 1.5)
+    step_x = int(text_w * 1.1)
     # Each row offset = 1/num_rows of image width
     row_shift = width // num_rows
     wave_amplitude = step_y // 6
