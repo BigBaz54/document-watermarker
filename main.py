@@ -5,6 +5,7 @@ import os
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 
@@ -101,6 +102,7 @@ def start_cleanup_thread():
 # App
 # ---------------------------------------------------------------------------
 app = FastAPI(title="Document Watermarker")
+work_pool = ThreadPoolExecutor(max_workers=1)
 
 
 @app.on_event("startup")
@@ -218,11 +220,7 @@ async def watermark(
             text = text.replace("{date}", date.today().strftime("%d/%m/%Y"))
         out_name = f"{Path(filename).stem}_watermarked{ext}"
         file_id = store_file(out_name, b"", media_type, status="processing")
-        threading.Thread(
-            target=process_in_background,
-            args=(file_id, data, ext, text, out_name),
-            daemon=True,
-        ).start()
+        work_pool.submit(process_in_background, file_id, data, ext, text, out_name)
     else:
         file_id = store_file(filename, data, media_type)
 
