@@ -214,17 +214,37 @@ async function loadHistory() {
       return;
     }
     items.reverse();
+    let hasProcessing = false;
     for (const item of items) {
       const li = document.createElement('li');
-      li.innerHTML = `
-        <span class="hname">${item.filename}</span>
-        <span class="expires">${formatExpiry(item.expires_in)}</span>
-        <a href="/files/${item.id}" download="${item.filename}">Save</a>`;
+      if (item.status === 'processing') {
+        hasProcessing = true;
+        li.innerHTML = `
+          <span class="hname">${item.filename}</span>
+          <span class="expires" style="color:#7c6ff7">processing…</span>`;
+      } else if (item.status === 'error') {
+        li.innerHTML = `
+          <span class="hname">${item.filename}</span>
+          <span class="expires" style="color:#e74c3c">error</span>`;
+      } else {
+        li.innerHTML = `
+          <span class="hname">${item.filename}</span>
+          <span class="expires">${formatExpiry(item.expires_in)}</span>
+          <a href="/files/${item.id}" download="${item.filename}">Save</a>`;
+      }
       historyList.appendChild(li);
+    }
+    // Poll faster while files are processing
+    if (hasProcessing && !historyPollFast) {
+      historyPollFast = setInterval(loadHistory, 2000);
+    } else if (!hasProcessing && historyPollFast) {
+      clearInterval(historyPollFast);
+      historyPollFast = null;
     }
   } catch (_) {}
 }
 
+let historyPollFast = null;
 loadHistory();
 setInterval(loadHistory, 30000);
 
@@ -252,17 +272,11 @@ submitBtn.addEventListener('click', () => {
       .catch(() => showToast(`${f.name}: Network error`, 'error'));
   }
 
-  showToast(`${total} file${total > 1 ? 's' : ''} sent for processing`, 'success');
+  showToast(`${total} file${total > 1 ? 's' : ''} sent`, 'success');
   selectedFiles = [];
   renderFileList();
   btnText.textContent = 'Apply Watermark';
-
-  // Poll history more frequently while processing
-  let polls = 0;
-  const pollId = setInterval(() => {
-    loadHistory();
-    if (++polls >= 30) clearInterval(pollId);
-  }, 2000);
+  loadHistory();
 });
 
 // --- Toasts ---

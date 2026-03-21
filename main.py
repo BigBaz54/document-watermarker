@@ -52,7 +52,7 @@ file_store: dict[str, dict] = {}
 store_lock = threading.Lock()
 
 
-def store_file(filename: str, data: bytes, media_type: str) -> str:
+def store_file(filename: str, data: bytes, media_type: str, status: str = "ready") -> str:
     file_id = uuid.uuid4().hex[:12]
     with store_lock:
         file_store[file_id] = {
@@ -60,8 +60,24 @@ def store_file(filename: str, data: bytes, media_type: str) -> str:
             "data": data,
             "media_type": media_type,
             "created": time.time(),
+            "status": status,
         }
     return file_id
+
+
+def process_in_background(file_id: str, data: bytes, ext: str, text: str, out_name: str):
+    try:
+        result = process_image(data, ext, text) if ext in IMAGE_EXTENSIONS else process_pdf(data, text)
+        media_type = MEDIA_TYPES.get(ext, "application/octet-stream")
+        with store_lock:
+            file_store[file_id]["data"] = result.read()
+            file_store[file_id]["media_type"] = media_type
+            file_store[file_id]["filename"] = out_name
+            file_store[file_id]["status"] = "ready"
+    except Exception as e:
+        log.error("Failed to process %s: %s", file_id, e)
+        with store_lock:
+            file_store[file_id]["status"] = "error"
 
 
 def cleanup_expired():
@@ -193,22 +209,24 @@ async def watermark(
     if len(data) > MAX_FILE_SIZE_BYTES:
         raise HTTPException(413, f"File exceeds {MAX_FILE_SIZE_MB} MB limit.")
 
+    media_type = MEDIA_TYPES.get(ext, "application/octet-stream")
+
     if apply == "true":
         text = watermark_text.strip() or WATERMARK_TEXT
         text = " — ".join(line.strip() for line in text.splitlines() if line.strip())
         if "{date}" in text:
             text = text.replace("{date}", date.today().strftime("%d/%m/%Y"))
-        result = process_image(data, ext, text) if ext in IMAGE_EXTENSIONS else process_pdf(data, text)
         out_name = f"{Path(filename).stem}_watermarked{ext}"
-        file_data = result.read()
+        file_id = store_file(out_name, b"", media_type, status="processing")
+        threading.Thread(
+            target=process_in_background,
+            args=(file_id, data, ext, text, out_name),
+            daemon=True,
+        ).start()
     else:
-        out_name = filename
-        file_data = data
+        file_id = store_file(filename, data, media_type)
 
-    media_type = MEDIA_TYPES.get(ext, "application/octet-stream")
-    file_id = store_file(out_name, file_data, media_type)
-
-    return JSONResponse({"id": file_id, "filename": out_name})
+    return JSONResponse({"id": file_id, "filename": filename})
 
 
 @app.get("/files")
@@ -221,6 +239,7 @@ async def list_files():
                 "id": k,
                 "filename": v["filename"],
                 "expires_in": int(FILE_TTL - (now - v["created"])),
+                "status": v.get("status", "ready"),
             }
             for k, v in file_store.items()
         ]
