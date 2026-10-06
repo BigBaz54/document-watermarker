@@ -2,6 +2,7 @@ services:
   app:
     build: .
     restart: unless-stopped
+    mem_limit: 2g
     environment:
       - WATERMARK_TEXT=CONFIDENTIEL
       - RASTERIZE_DPI=300

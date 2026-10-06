@@ -22,6 +22,7 @@ log = logging.getLogger("uvicorn.error")
 # ---------------------------------------------------------------------------
 WATERMARK_TEXT = os.getenv("WATERMARK_TEXT", "Copie destinée à : — Usage : — Date : {date}")
 RASTERIZE_DPI = int(os.getenv("RASTERIZE_DPI", "300"))
+MAX_LONG_SIDE_PX = int(os.getenv("MAX_LONG_SIDE_PX", "3508"))  # A4 at 300 DPI
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 WATERMARK_OPACITY = int(os.getenv("WATERMARK_OPACITY", "100"))
 WATERMARK_ROWS = int(os.getenv("WATERMARK_ROWS", "6"))
@@ -152,7 +153,9 @@ def apply_watermark(image: Image.Image, text: str) -> Image.Image:
 
 
 def process_image(data: bytes, ext: str, text: str) -> io.BytesIO:
-    watermarked = apply_watermark(Image.open(io.BytesIO(data)), text)
+    image = Image.open(io.BytesIO(data))
+    image.thumbnail((MAX_LONG_SIDE_PX, MAX_LONG_SIDE_PX))
+    watermarked = apply_watermark(image, text)
     output = io.BytesIO()
     if ext in (".jpg", ".jpeg"):
         watermarked.convert("RGB").save(output, format="JPEG", quality=95)
@@ -166,25 +169,33 @@ def process_image(data: bytes, ext: str, text: str) -> io.BytesIO:
 
 def process_pdf(data: bytes, text: str) -> io.BytesIO:
     doc = fitz.open(stream=data, filetype="pdf")
-    pages: list[Image.Image] = []
+    out = fitz.open()
     overlay_cache: dict[tuple[int, int], Image.Image] = {}
 
     for page in doc:
-        pix = page.get_pixmap(dpi=RASTERIZE_DPI)
+        # Cap pixel size: pages sized from photo pixels would otherwise rasterize to gigabytes
+        rect = page.rect
+        dpi = RASTERIZE_DPI
+        long_side_px = max(rect.width, rect.height) * dpi / 72
+        if long_side_px > MAX_LONG_SIDE_PX + 1:
+            dpi = max(1, int(dpi * MAX_LONG_SIDE_PX / long_side_px))
+        pix = page.get_pixmap(dpi=dpi)
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples).convert("RGBA")
         key = (img.width, img.height)
         if key not in overlay_cache:
             overlay_cache[key] = create_watermark_overlay(img.width, img.height, text)
         img = Image.alpha_composite(img, overlay_cache[key]).convert("RGB")
-        pages.append(img)
+
+        # Write each page out immediately instead of holding every raster in memory
+        jpeg = io.BytesIO()
+        img.save(jpeg, format="JPEG", quality=90)
+        out.new_page(width=rect.width, height=rect.height).insert_image(
+            fitz.Rect(0, 0, rect.width, rect.height), stream=jpeg.getvalue()
+        )
     doc.close()
 
-    output = io.BytesIO()
-    pages[0].save(
-        output, format="PDF", resolution=RASTERIZE_DPI,
-        save_all=len(pages) > 1, append_images=pages[1:] if len(pages) > 1 else [],
-    )
-    output.seek(0)
+    output = io.BytesIO(out.tobytes(garbage=3, deflate=True))
+    out.close()
     return output
 
 
